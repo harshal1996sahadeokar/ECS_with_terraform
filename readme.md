@@ -20,4 +20,5 @@ Before deploying, ensure you have:
 
 ### 1️⃣ Clone the Repository
 ```sh
+https://github.com/harshal1996sahadeokar/ECS_with_terraform.git
 
