@@ -1,141 +1,56 @@
 provider "aws" {
-  region = "ap-south-1"
+  region = var.aws_region
 }
 
-# 🔹 Create ECS Cluster
-resource "aws_ecs_cluster" "nginx_cluster" {
-  name = "nginx-ecs-cluster"
+resource "aws_ecs_cluster" "ecs_cluster" {
+  name = var.ecs_cluster_name
 }
 
-# 🔹 IAM Role for ECS Task Execution (Fixed Naming)
-resource "aws_iam_role" "ecs_task_execution_role" {
-  name = "ecsTaskExecutionRole1"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Action = "sts:AssumeRole"
-      Principal = {
-        Service = "ecs-tasks.amazonaws.com"
-      }
-    }]
-  })
+# IAM Role for ECS Instances
+resource "aws_iam_role" "ecs_instance_role" {
+  name               = "ecsInstanceRole"
+  assume_role_policy = file("${path.module}/policies/ecs_task_execution_policy.json")
 }
 
-# 🔹 Attach Required ECS Policies
-resource "aws_iam_role_policy_attachment" "ecs_task_execution_policy" {
-  role       = aws_iam_role.ecs_task_execution_role.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+# Attach the AWS Managed ECS Policy
+resource "aws_iam_role_policy_attachment" "ecs_instance_role_attach" {
+  role       = aws_iam_role.ecs_instance_role.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role"
 }
 
-# 🔹 Define ECS Task Definition for NGINX
-resource "aws_ecs_task_definition" "nginx_task" {
-  family                   = "nginx-task"
-  network_mode             = "awsvpc"
-  requires_compatibilities = ["FARGATE"]
-  execution_role_arn       = aws_iam_role.ecs_task_execution_role.arn
-  cpu                      = "256"
-  memory                   = "512"
+# Launch Template
+resource "aws_launch_template" "ecs_lt" {
+  name          = "ecs-launch-template"
+  image_id      = var.ami_id
+  instance_type = var.instance_type
+  key_name      = var.key_name
 
-  container_definitions = jsonencode([
-    {
-      name      = "nginx-container"
-      image     = "nginx:latest"
-      cpu       = 256
-      memory    = 512
-      essential = true
-      portMappings = [
-        {
-          containerPort = 80
-          hostPort      = 80
-          protocol      = "tcp"
-        }
-      ]
-    }
-  ])
-}
-
-# 🔹 Create Security Group for ECS
-resource "aws_security_group" "ecs_sg" {
-  name_prefix = "ecs-sg-"
-  vpc_id      = "vpc-052886a997da3e464"  # Replace with your VPC ID
-
-  ingress {
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+  iam_instance_profile {
+    name = aws_iam_instance_profile.ecs_instance_profile.name
   }
 
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
+  user_data = base64encode(<<EOF
+#!/bin/bash
+echo "ECS_CLUSTER=${var.ecs_cluster_name}" >> /etc/ecs/ecs.config
+EOF
+  )
+}
+
+# IAM Instance Profile
+resource "aws_iam_instance_profile" "ecs_instance_profile" {
+  name = "ecsInstanceProfile"
+  role = aws_iam_role.ecs_instance_role.name
+}
+
+# Auto Scaling Group
+resource "aws_autoscaling_group" "ecs_asg" {
+  desired_capacity     = var.desired_capacity
+  max_size            = var.max_size
+  min_size            = var.min_size
+  vpc_zone_identifier = var.subnet_ids
+
+  launch_template {
+    id      = aws_launch_template.ecs_lt.id
+    version = "$Latest"
   }
-}
-
-# 🔹 Create an Application Load Balancer (ALB)
-resource "aws_lb" "nginx_alb" {
-  name               = "nginx-alb"
-  internal           = false
-  load_balancer_type = "application"
-  security_groups    = [aws_security_group.ecs_sg.id]
-  subnets            = ["subnet-01c77ed334a7370f5", "subnet-09f9df3a6be9b2791"]  # Replace with your subnet IDs
-}
-
-# 🔹 ALB Target Group
-resource "aws_lb_target_group" "nginx_tg" {
-  name        = "nginx-tg"
-  port        = 80
-  protocol    = "HTTP"
-  vpc_id      = "vpc-052886a997da3e464"  # Replace with your VPC ID
-  target_type = "ip"
-}
-
-# 🔹 ALB Listener (Explicit Dependency Fix)
-resource "aws_lb_listener" "nginx_listener" {
-  load_balancer_arn = aws_lb.nginx_alb.arn
-  port              = 80
-  protocol          = "HTTP"
-
-  default_action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.nginx_tg.arn
-  }
-}
-
-# 🔹 Create ECS Service (Ensured Dependencies)
-resource "aws_ecs_service" "nginx_service" {
-  name            = "nginx-service"
-  cluster         = aws_ecs_cluster.nginx_cluster.id
-  task_definition = aws_ecs_task_definition.nginx_task.arn
-  launch_type     = "FARGATE"
-  desired_count   = 2
-
-  network_configuration {
-    subnets          = ["subnet-01c77ed334a7370f5", "subnet-09f9df3a6be9b2791"]  # Replace with your subnet IDs
-    security_groups  = [aws_security_group.ecs_sg.id]
-    assign_public_ip = true
-  }
-
-  load_balancer {
-    target_group_arn = aws_lb_target_group.nginx_tg.arn
-    container_name   = "nginx-container"
-    container_port   = 80
-  }
-
-  depends_on = [aws_lb_listener.nginx_listener]
-}
-
-# 🔹 Output ALB DNS Name & ECS Task Info
-output "alb_dns" {
-  description = "ALB DNS Name"
-  value       = aws_lb.nginx_alb.dns_name
-}
-
-output "ecs_task_def" {
-  description = "ECS Task Definition ARN"
-  value       = aws_ecs_task_definition.nginx_task.arn
 }
