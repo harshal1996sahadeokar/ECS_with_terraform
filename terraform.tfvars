@@ -1,0 +1,9 @@
+aws_region       = "us-east-1"
+ecs_cluster_name = "my-ecs-ec2-cluster"
+ami_id           = "ami-0abcdef1234567890"
+instance_type    = "t3.micro"
+key_name         = "my-key-pair"
+desired_capacity = 2
+max_size         = 3
+min_size         = 1
+subnet_ids       = ["subnet-12345678", "subnet-87654321"]
