@@ -10,17 +10,8 @@ resource "aws_ecs_cluster" "nginx_cluster" {
 # 🔹 IAM Role for ECS Task Execution (Fixed Naming)
 resource "aws_iam_role" "ecs_task_execution_role" {
   name = "ecsTaskExecutionRole1"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Action = "sts:AssumeRole"
-      Principal = {
-        Service = "ecs-tasks.amazonaws.com"
-      }
-    }]
-  })
+  assume_role_policy = "${file("policies/ecsTaskExecutionRole1.json")}"
+  
 }
 
 # 🔹 Attach Required ECS Policies
@@ -56,25 +47,6 @@ resource "aws_ecs_task_definition" "nginx_task" {
   ])
 }
 
-# 🔹 Create Security Group for ECS
-resource "aws_security_group" "ecs_sg" {
-  name_prefix = "ecs-sg-"
-  vpc_id      = "vpc-052886a997da3e464"  # Replace with your VPC ID
-
-  ingress {
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-}
 
 # 🔹 Create an Application Load Balancer (ALB)
 resource "aws_lb" "nginx_alb" {
